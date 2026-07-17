@@ -1,0 +1,40 @@
+<svg width="320" height="320" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+  <!-- shadow -->
+  <ellipse cx="160" cy="296" rx="70" ry="12" fill="#000000" opacity="0.12"/>
+
+  <!-- legs -->
+  <ellipse cx="112" cy="266" rx="20" ry="24" fill="#6b6459"/>
+  <ellipse cx="208" cy="266" rx="20" ry="24" fill="#6b6459"/>
+
+  <!-- body -->
+  <ellipse cx="160" cy="210" rx="98" ry="82" fill="#8a8577"/>
+  <!-- belly -->
+  <ellipse cx="164" cy="232" rx="62" ry="46" fill="#b3ac9b"/>
+
+  <!-- head -->
+  <ellipse cx="222" cy="150" rx="66" ry="56" fill="#8a8577"/>
+  <!-- snout -->
+  <ellipse cx="262" cy="168" rx="34" ry="28" fill="#b3ac9b"/>
+  <!-- nostrils -->
+  <ellipse cx="278" cy="160" rx="4.5" ry="6" fill="#3a3730"/>
+  <ellipse cx="278" cy="176" rx="4.5" ry="6" fill="#3a3730"/>
+
+  <!-- ears -->
+  <ellipse cx="188" cy="96" rx="15" ry="18" fill="#5a5548" transform="rotate(-18 188 96)"/>
+  <ellipse cx="230" cy="92" rx="15" ry="18" fill="#5a5548" transform="rotate(10 230 92)"/>
+
+  <!-- eyes -->
+  <circle cx="204" cy="132" r="8" fill="#241f18"/>
+  <circle cx="242" cy="130" r="8" fill="#241f18"/>
+  <circle cx="206.5" cy="129.5" r="2.6" fill="#ffffff"/>
+  <circle cx="244.5" cy="127.5" r="2.6" fill="#ffffff"/>
+
+  <!-- blush -->
+  <ellipse cx="196" cy="152" rx="12" ry="7" fill="#ff9db0" opacity="0.55"/>
+  <ellipse cx="252" cy="150" rx="12" ry="7" fill="#ff9db0" opacity="0.55"/>
+
+  <!-- little spots for texture -->
+  <circle cx="130" cy="190" r="7" fill="#75705f" opacity="0.5"/>
+  <circle cx="176" cy="250" r="9" fill="#75705f" opacity="0.5"/>
+  <circle cx="120" cy="230" r="6" fill="#75705f" opacity="0.4"/>
+</svg>
