@@ -212,10 +212,12 @@
   const MAX_HOLD_RISE = 900; // px cap safety
   const TOTAL_TIME = 60;        // whole run has 60 seconds total
   const BREAD_Y_JITTER = 42;    // loaves within a round can sit at different heights
+  const SETTLE_DURATION = 0.22; // seconds — smooth touch-down instead of an instant snap
+  const PLATFORM_DRIFT_MIN = 40, PLATFORM_DRIFT_MAX = 85; // px/s, resting bread keeps drifting
 
-  let state = 'start'; // start | onPlatform | holding | falling | dead
+  let state = 'start'; // start | onPlatform | holding | falling | settling
   let capX = 0, capWorldY = 0, capVy = 0;
-  let restingPlatform = null; // {x, level, isPlate}
+  let restingPlatform = null; // {x, level, isPlate, y, w, vx}
   let targetBreads = []; // array of {x, y, vx, level, w,h}
   let currentLevel = 0;
   let best = 0;
@@ -224,6 +226,17 @@
   let legPhase = 0;
   let totalTimeLeft = TOTAL_TIME;
   let customCapyImg = null;
+  let settleFromX = 0, settleFromY = 0, settleTimer = 0;
+
+  // ---------- Default character: loaded from character.svg next to this HTML file ----------
+  // To change the character later, just replace character.svg (same filename, same folder)
+  // and reload the page — no need to touch this code.
+  function loadDefaultCapybara(){
+    const img = new Image();
+    img.onload = () => { customCapyImg = img; };
+    img.onerror = () => { console.warn('character.svg kunde inte laddas — använder standardfiguren.'); };
+    img.src = 'character.svg?v=' + Date.now(); // cache-bust so a replaced file shows up on reload
+  }
 
   let clouds = [];
   function initClouds(){
@@ -290,6 +303,7 @@
 
   // ---------- Input ----------
   let holdStart = 0;
+  let holdBaseY = 0;
   function pointerDown(e){
     e.preventDefault();
     if(state !== 'onPlatform') return;
@@ -297,6 +311,7 @@
     state = 'holding';
     holdStart = performance.now();
     capX = restingPlatform.x;
+    holdBaseY = restingPlatform.y;
     hint.style.opacity = '0';
     holdBarWrap.classList.add('show');
     sndJump();
@@ -379,18 +394,34 @@
       return;
     }
 
-    // move all active target bread loaves
+    // move all active target bread loaves (free to fly fully off-screen and wrap around)
     for(const b of targetBreads){
       b.x += b.vx * dt;
       if(b.vx > 0 && b.x > W + b.w) b.x = -b.w;
       if(b.vx < 0 && b.x < -b.w) b.x = W + b.w;
     }
 
-    if(state === 'holding'){
+    // the platform capybara is currently on (or launched from) keeps gently drifting,
+    // but it's never allowed to wander off-screen — it bounces back the moment it would
+    if(restingPlatform && !restingPlatform.isPlate){
+      if(restingPlatform.vx === undefined){
+        restingPlatform.vx = (Math.random() < 0.5 ? -1 : 1) * (PLATFORM_DRIFT_MIN + Math.random()*(PLATFORM_DRIFT_MAX-PLATFORM_DRIFT_MIN));
+      }
+      restingPlatform.x += restingPlatform.vx * dt;
+      const half = restingPlatform.w/2, margin = 24;
+      if(restingPlatform.x < half+margin){ restingPlatform.x = half+margin; restingPlatform.vx = Math.abs(restingPlatform.vx); }
+      if(restingPlatform.x > W-half-margin){ restingPlatform.x = W-half-margin; restingPlatform.vx = -Math.abs(restingPlatform.vx); }
+    }
+
+    if(state === 'onPlatform'){
+      // ride along with the platform while waiting to jump
+      capX = restingPlatform.x;
+      capWorldY = restingPlatform.y;
+    }
+    else if(state === 'holding'){
       const held = (performance.now() - holdStart)/1000;
       const rise = Math.min(held * RISE_SPEED, MAX_HOLD_RISE);
-      capWorldY = restingPlatform.y + rise;
-      const pct = Math.min(1, rise / LEVEL_GAP) ;
+      capWorldY = holdBaseY + rise;
       holdBar.style.width = (Math.min(1.35, held*RISE_SPEED/LEVEL_GAP) * 100) + '%';
       squash = 1 - Math.min(0.18, held*0.35);
     }
@@ -409,31 +440,41 @@
           }
         }
         if(landed){
-          // successful landing
+          // successful landing — smoothly settle onto the new bread instead of snapping
           currentLevel = landed.level;
-          capWorldY = landed.y;
-          capVy = 0;
-          capX = landed.x;
           restingPlatform = { x: landed.x, level: currentLevel, isPlate: false, w: landed.w, y: landed.y };
           targetBreads = spawnBreadsForLevel(currentLevel + 1);
-          state = 'onPlatform';
-          squash = 0.78;
+          settleFromX = capX; settleFromY = capWorldY; settleTimer = 0;
+          state = 'settling';
           sndLand();
           updateHud();
           hint.style.opacity = '0.9';
         }
       }
 
-      const floor = restingPlatform.y - FALL_BUFFER;
-      if(capWorldY < floor){
-        // missed every loaf this round — bounce back to the platform you jumped from, no death
-        capWorldY = restingPlatform.y;
-        capVy = 0;
+      if(state === 'falling'){
+        const floor = restingPlatform.y - FALL_BUFFER;
+        if(capWorldY < floor){
+          // missed every loaf this round — smoothly return to the platform jumped from, no death
+          settleFromX = capX; settleFromY = capWorldY; settleTimer = 0;
+          state = 'settling';
+          sndBounce();
+          hint.style.opacity = '0.9';
+        }
+      }
+    }
+    else if(state === 'settling'){
+      settleTimer += dt;
+      const t = Math.min(1, settleTimer / SETTLE_DURATION);
+      const ease = 1 - Math.pow(1-t, 3); // easeOutCubic
+      capX = settleFromX + (restingPlatform.x - settleFromX) * ease;
+      capWorldY = settleFromY + (restingPlatform.y - settleFromY) * ease;
+      squash = 1 - Math.sin(Math.min(1,t*1.15) * Math.PI) * 0.22; // gentle touch-down dip
+      if(t >= 1){
         capX = restingPlatform.x;
+        capWorldY = restingPlatform.y;
+        squash = 1;
         state = 'onPlatform';
-        squash = 0.85;
-        sndBounce();
-        hint.style.opacity = '0.9';
       }
     }
 
@@ -623,9 +664,10 @@
     ctx.beginPath(); ctx.ellipse(0, 20, 30, 8, 0, 0, Math.PI*2); ctx.fill();
 
     if(customCapyImg){
-      const iw = 90;
+      const iw = 92;
       const ih = iw * (customCapyImg.height / customCapyImg.width);
-      ctx.drawImage(customCapyImg, -iw/2, -ih/2 - 4, iw, ih);
+      const baseline = 14; // feet rest just above the shadow, grounded on the platform
+      ctx.drawImage(customCapyImg, -iw/2, baseline - ih, iw, ih);
       ctx.restore();
       return;
     }
@@ -696,6 +738,7 @@
 
   resize();
   initClouds();
+  loadDefaultCapybara();
   draw();
   requestAnimationFrame(frame);
 })();
