@@ -101,6 +101,15 @@
     pointer-events: none; opacity: 0; transition: opacity 0.2s;
   }
   #timeText.show { opacity: 0.95; }
+
+  #charLoadToast {
+    position: fixed; top: 110px; left: 50%; transform: translateX(-50%);
+    max-width: 88%; background: rgba(60,20,20,0.88); color: #fff;
+    font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 12px;
+    text-align: center; z-index: 20; opacity: 0; pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  #charLoadToast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -123,6 +132,7 @@
 <div id="holdBarWrap"><div id="holdBar"></div></div>
 <div id="roundTimerWrap"><div id="roundTimerBar"></div></div>
 <div id="timeText">60 s kvar</div>
+<div id="charLoadToast"></div>
 
 <button id="charBtn" title="Byt figur (SVG eller PNG)" style="position:fixed; bottom:16px; right:16px; width:44px; height:44px; border-radius:50%; border:none; background:rgba(255,255,255,0.85); font-size:20px; cursor:pointer; box-shadow:0 3px 10px rgba(0,0,0,0.25); z-index:5;">🎨</button>
 <input type="file" id="capyFileInput" accept="image/svg+xml,image/png,image/jpeg" style="display:none;">
@@ -178,6 +188,7 @@
   const dailyBestValEl = document.getElementById('dailyBestVal');
   const weeklyBestValEl = document.getElementById('weeklyBestVal');
   const livesRow = document.getElementById('livesRow');
+  const charLoadToast = document.getElementById('charLoadToast');
   const startBtn = document.getElementById('startBtn');
   const restartBtn = document.getElementById('restartBtn');
   const holdBarWrap = document.getElementById('holdBarWrap');
@@ -248,7 +259,8 @@
   let legPhase = 0;
   let totalTimeLeft = TOTAL_TIME;
   let customCapyImg = null;
-  let settleFromX = 0, settleFromY = 0, settleTimer = 0;
+  let settleFromX = 0, settleFromY = 0, settleTimer = 0, settleDuration = SETTLE_DURATION;
+  let groundedTimer = -1;
   let crumbs = []; // little particle burst when a moldy loaf crumbles
 
   // ---------- Character roster: loaded from characterN.svg files next to this HTML ----------
@@ -259,10 +271,21 @@
   function loadCharacterImage(url, onDone){
     const img = new Image();
     img.onload = () => { customCapyImg = img; if(onDone) onDone(true); };
-    img.onerror = () => { console.warn(url + ' kunde inte laddas.'); if(onDone) onDone(false); };
+    img.onerror = () => {
+      console.warn(url + ' kunde inte laddas.');
+      showCharLoadError(url);
+      if(onDone) onDone(false);
+    };
     img.src = url + '?v=' + Date.now(); // cache-bust so a replaced file shows up on reload
   }
   function loadDefaultCapybara(){ loadCharacterImage(CHAR_FILES[selectedCharIndex]); }
+  let charToastTimer = null;
+  function showCharLoadError(url){
+    charLoadToast.textContent = 'Kunde inte läsa ' + url + ' — ligger filen i samma mapp som HTML-filen? Visar standardfiguren istället.';
+    charLoadToast.classList.add('show');
+    if(charToastTimer) clearTimeout(charToastTimer);
+    charToastTimer = setTimeout(()=> charLoadToast.classList.remove('show'), 4500);
+  }
 
   let clouds = [];
   function initClouds(){
@@ -470,10 +493,17 @@
     if(lives > 0){
       lives--;
       updateLivesHud();
-      settleFromX = capX; settleFromY = capWorldY; settleTimer = 0;
-      state = 'settling';
       isBad ? sndBreak() : sndBounce();
       hint.style.opacity = '0.9';
+      // if the ground is currently in view, fall all the way down onto it;
+      // otherwise fall fully out of sight first — either way, reappear afterwards
+      const groundInView = screenY(0) <= H + 60;
+      if(groundInView){
+        groundedTimer = -1;
+        state = 'fallingToGround';
+      } else {
+        state = 'fallingOffscreen';
+      }
     } else {
       isBad ? sndBreak() : sndFail();
       registerScore(currentLevel);
@@ -575,7 +605,7 @@
           currentLevel = landed.level;
           restingPlatform = { x: landed.x, level: currentLevel, isPlate: false, w: landed.w, y: landed.y };
           targetBreads = spawnBreadsForLevel(currentLevel + 1);
-          settleFromX = capX; settleFromY = capWorldY; settleTimer = 0;
+          settleFromX = capX; settleFromY = capWorldY; settleTimer = 0; settleDuration = SETTLE_DURATION;
           state = 'settling';
           sndLand();
           updateHud();
@@ -591,9 +621,42 @@
         }
       }
     }
+    else if(state === 'fallingToGround'){
+      // ground is in view — let the capybara actually fall down and land on the grass
+      if(groundedTimer < 0){
+        capVy -= GRAVITY * dt;
+        capWorldY += capVy * dt;
+        squash = 1;
+        if(capWorldY <= 0){
+          capWorldY = 0;
+          capVy = 0;
+          groundedTimer = 0;
+          squash = 0.66;
+        }
+      } else {
+        groundedTimer += dt;
+        squash += (1 - squash) * Math.min(1, dt*7); // settle out of the touch-down squish
+        if(groundedTimer > 0.22){
+          settleFromX = capX; settleFromY = 0; settleTimer = 0; settleDuration = 0.35;
+          state = 'settling';
+        }
+      }
+    }
+    else if(state === 'fallingOffscreen'){
+      // ground isn't in view — let the capybara fall fully out of sight, then reappear
+      capVy -= GRAVITY * dt;
+      capWorldY += capVy * dt;
+      squash = 1;
+      if(screenY(capWorldY) > H + 60){
+        settleFromX = restingPlatform.x;
+        settleFromY = restingPlatform.y - 260; // reappears rising up from just below view
+        settleTimer = 0; settleDuration = 0.4;
+        state = 'settling';
+      }
+    }
     else if(state === 'settling'){
       settleTimer += dt;
-      const t = Math.min(1, settleTimer / SETTLE_DURATION);
+      const t = Math.min(1, settleTimer / settleDuration);
       const ease = 1 - Math.pow(1-t, 3); // easeOutCubic
       capX = settleFromX + (restingPlatform.x - settleFromX) * ease;
       capWorldY = settleFromY + (restingPlatform.y - settleFromY) * ease;
